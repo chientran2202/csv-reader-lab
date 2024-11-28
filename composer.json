@@ -1,0 +1,16 @@
+{
+    "name": "leontec/csvreaderlab",
+    "description": "CSV Reader",
+    "autoload": {
+        "psr-4": {
+            "Leontec\\Csvreaderlab\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "chientran2202",
+            "email": "mchien@leontec.co.jp"
+        }
+    ],
+    "require": {}
+}
