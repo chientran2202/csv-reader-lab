@@ -1,6 +1,8 @@
 {
     "name": "leontec/csvreaderlab",
     "description": "CSV Reader",
+    "type": "library",
+    "license": "MIT",
     "autoload": {
         "psr-4": {
             "Leontec\\Csvreaderlab\\": "src/"
@@ -12,5 +14,6 @@
             "email": "mchien@leontec.co.jp"
         }
     ],
+    "minimum-stability": "stable",
     "require": {}
 }
