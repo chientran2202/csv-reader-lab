@@ -14,6 +14,12 @@
             "email": "mchien@leontec.co.jp"
         }
     ],
-    "minimum-stability": "stable",
-    "require": {}
+    "minimum-stability": "dev",
+    "require": {
+        "php": ">=5.5"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^5.7"
+    },
+    "prefer-stable": true
 }
