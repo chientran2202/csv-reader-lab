@@ -2,186 +2,89 @@
 
 namespace Leontec\CsvReaderLab;
 
-use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Storage;
-
 class CSVReader {
-    public static function csvToArray($fileName = '', $header = [], $onlyNeedHeader = [], $mustEncoding = true, $delimiter = ',')
-	{
-		$onlyNeedHeader = count($onlyNeedHeader) ? $onlyNeedHeader : $header;
+    private $csvfile;
+    private $from_encoding ='', $to_encoding = '';
+    private $isEncoding = false;
+    private $headerMapping = [];
+    private $isSkipReadHeader = false;
+    private $totalRows = 0;
+    const DATA_ARRAY = 0;
+    const DATA_STRING = 1;
 
-		if (!file_exists($fileName) || !is_readable($fileName))
-			return false;
+    public function __construct($csvfile)
+    {
+        $this->csvfile = $csvfile;
+    }
+    public static function make($csvfile): self
+    {
+        return new self($csvfile);
+    }
 
-		$data = array();
-		if (($handle = fopen($fileName, 'r')) !== false) {
-			while (($row = fgetcsv($handle, null, $delimiter)) !== false) {
-				$data[] = self::genData($header, $row, $onlyNeedHeader, $mustEncoding);
-			}
-			fclose($handle);
-		}
-		return $data;
-	}
+    public function encoding($from_encoding = 'SJIS', $to_encoding = 'UTF-8'): self
+    {
+        $this->from_encoding = $from_encoding;
+        $this->to_encoding = $to_encoding;
+        if ($from_encoding && $to_encoding) {
+            $this->isEncoding = true;
+        }
+        return $this;
+    }
+    public function headerMapping($arr): self
+    {
+        $this->headerMapping = $arr;
+        return $this;
+    }
+    public function skipReadHeader($is_skip = false): self
+    {
+        $this->isSkipReadHeader = $is_skip;
+        return $this;
+    }
+    public function getTotalRows(){
+        return $this->totalRows;
+    }
+    public function read($readType = self::DATA_STRING, callable $callback = null){
+        if (!$callback | ($readType != self::DATA_STRING && $readType != self::DATA_ARRAY)) return;
 
-	public static function genData($header, $row, $onlyNeedHeader, $mustEncoding)
-	{
-		$rowData = [];
-		foreach ($onlyNeedHeader as $key => $value) {
-			$s = array_search($value, $header);
-			if ($s >= 0) {
-				$rowData[$value] = isset($row[$s]) ? ($mustEncoding ? self::convertCharacterToUtf8($row[$s]) : $row[$s]) : null;
-			} else $rowData[$value] = null;
-		}
-		return $rowData;
-	}
+        $csvContent = fopen($this->csvfile, 'r');
+        if (!$csvContent) return;
 
-	public static function convertCharacterToUtf8($string)
-	{
-		$encoding = mb_detect_encoding($string, 'UTF-8, SJIS', true); //'UTF-8, SJIS, ISO-8859-1, WINDOWS-1252, WINDOWS-1251'
-		$stringSJISWIN = mb_convert_encoding($string, "UTF-8", "SJIS-win");
+        $index = 0;
+        //handle header csv
+        $arrHeaderCsv = fgetcsv($csvContent);
+        if(!$this->isSkipReadHeader){
+            if($this->isEncoding)
+                $arrHeaderCsv = mb_convert_encoding($arrHeaderCsv, $this->to_encoding, $this->from_encoding);
 
-		if ($encoding === false) return $stringSJISWIN;
-		else if ($encoding != 'UTF-8') {
-			try {
-				$stringSJIS = iconv($encoding, 'UTF-8//IGNORE', $string);
-			} catch (\Throwable $th) {
-				$stringSJIS = self::convertToUTF8($encoding);
-			}
+            $result = $callback($index++, $arrHeaderCsv);
+            if(isset($result) && !$result) return;
+        }
 
-			if ( //bắt lỗi các trường hợp của sjis-win replace bằng sjis
-				strlen($stringSJIS) < strlen($stringSJISWIN)
-			)
-				return $stringSJIS;
-			return $stringSJISWIN;
-		}
-		return $string; // or $stringSJIS
-	}
+        $arrKey = [];
+        if($this->headerMapping){
+            foreach ($arrHeaderCsv As $key => $value){
+                $arrKey[] = $this->headerMapping[$value] ?? $value;
+            }
+        }
 
-	public static function convertToUTF8($text)
-	{
-		$encoding = mb_detect_encoding($text, mb_detect_order(), false);
-		if ($encoding == "UTF-8") $text = mb_convert_encoding($text, 'UTF-8', 'UTF-8');
-		return iconv(mb_detect_encoding($text, mb_detect_order(), false), "UTF-8//IGNORE", $text);
-	}
+        $result = [];
+        while (($dataRow = fgetcsv($csvContent)) !== false) {
+            if (array(null) === $dataRow) continue;
+            if ($this->isEncoding)
+                $dataRow = mb_convert_encoding($dataRow, $this->to_encoding, $this->from_encoding);
 
-	public static function convertCharacterToSjis($string, $encoding = 'SJIS')
-	{
-		//"SJIS-win"
-		if (!is_array($string))
-			$string = mb_convert_encoding($string, $encoding, "UTF-8");
-		else {
-			$data = [];
-			foreach ($string as $value) {
-				$data[] = mb_convert_encoding("\"$value\"", $encoding, "UTF-8");
-			}
-			$string = $data;
-		}
-		return $string;
-	}
-	
-	public static function convertCharacterToSjisWin($string, $encoding = 'SJIS-win')
-	{
-		//"SJIS-win"
-		if (!is_array($string))
-			$string = mb_convert_encoding($string, $encoding, "UTF-8");
-		else {
-			$data = [];
-			foreach ($string as $value) {
-				$data[] = mb_convert_encoding("\"$value\"", $encoding, "UTF-8");
-			}
-			$string = $data;
-		}
-		$string_re = str_replace("\n", "\r\n", $string);
-		return $string_re;
-	}
+            if ($arrKey && count($arrKey) == count($dataRow))
+                $dataRow = array_combine($arrKey, $dataRow);
 
-	public static function arrayToCSV($datas, $fileName = '', $encoding = 'SJIS', $delimiter = ',', $header = [], $storageFolder = '')
-	{
-		$csvFile = tmpfile();
-		$csvPath = stream_get_meta_data($csvFile)['uri'];
+            $callbackResult = $callback($index++, $dataRow);
+            if ($callbackResult === false) break;
+            elseif ($callbackResult === true) continue;
+            else {
+                $result[] = $callbackResult;
+            }
+        }
 
-		$file = fopen($csvPath, 'w');
-		fputcsv($file, self::convertCharacterToSjis(array_keys($header), $encoding), $delimiter, chr(0));
-
-		foreach ($datas as $data) {
-			$dataField = [];
-			foreach ($header as $key => $value) {
-				$fields = explode('.', $value);
-				if (count($fields) == 1) $dataField[] = $data->$value ?: '';
-				else {
-					$model = $fields[0];
-					$field = $fields[1];
-					$dataField[] = $data->$model ? $data->$model->$field : '';
-				}
-			}
-			fputcsv($file, self::convertCharacterToSjis($dataField), $delimiter, chr(0));
-		}
-		fclose($file);
-
-		$fileSaved = Storage::putFileAs($storageFolder, $csvPath, $fileName);
-		return [
-			'status' => true,
-			'path' => $fileSaved, //storage_path($fileSaved),
-			'folder' => $storageFolder
-		];
-	}
-
-	public static function removeHeaderFile($fileName)
-	{
-		if (File::exists($fileName)) {
-			$file = file_get_contents($fileName);
-			$arr = explode("\r\n", $file);
-			if (isset($arr[0])) unset($arr[0]);
-			$string = implode("\r\n", $arr); //'\n\r'
-			file_put_contents($fileName, $string);
-			return true;
-		}
-		return false;
-	}
-
-	public static function addHeaderFile($fileName, $headers, $delimiter = ',', $isConvertCharacter = false)
-	{
-		$header = implode($delimiter, $headers);
-		if ($isConvertCharacter) $header = self::convertCharacterToSjis($header);
-		if (File::exists($fileName)) {
-			file_put_contents($fileName, $header . "\r\n" . file_get_contents(iconv('UTF-8', 'big-5//TRANSLIT', $fileName)));
-			return true;
-		}
-		return false;
-	}
-
-	public static function changeDelimiter($fileName, $fromDelimiter = "\t", $toDelimiter = ',')
-	{
-		if (File::exists($fileName)) {
-			file_put_contents($fileName, str_replace($fromDelimiter, $toDelimiter, file_get_contents($fileName)));
-			return true;
-		}
-		return false;
-	}
-
-	public static function exportFileFormat($fileName, $headers, $fromDelimiter = "\t", $toDelimiter = ',')
-	{
-		if (File::exists($fileName)) {
-			$file = file_get_contents($fileName);
-			$arr = explode(PHP_EOL, $file);
-			//change header
-			if (isset($arr[0])) $arr[0] = implode($toDelimiter, $headers);
-			$string = implode(PHP_EOL, $arr);
-			file_put_contents($fileName, self::convertCharacterToSjis(str_replace($fromDelimiter, $toDelimiter, $string)));
-			return true;
-		}
-		return false;
-	}
-
-    public static function exportRawToCsv($fileName, $datas)
-	{
-        $csvData = implode(PHP_EOL, $datas);
-        Storage::append($fileName, self::convertCharacterToSjis($csvData));
-	}
-	
-	public static function exportRawToCsvWin($fileName, $datas)
-	{
-        $csvData = implode(PHP_EOL, $datas);
-        Storage::append($fileName, self::convertCharacterToSjisWin($csvData));
-	}
+        $this->totalRows = $index;
+        return $result;
+    }
 }
