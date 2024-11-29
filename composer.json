@@ -1,11 +1,11 @@
 {
-    "name": "leontec/csvreaderlab",
+    "name": "leontec/csvReaderLab",
     "description": "CSV Reader",
     "type": "library",
     "license": "MIT",
     "autoload": {
         "psr-4": {
-            "Leontec\\Csvreaderlab\\": "src/"
+            "Leontec\\CsvReaderLab\\": "src/"
         }
     },
     "authors": [
