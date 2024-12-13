@@ -23,6 +23,38 @@ class CSVService {
 		return $data;
 	}
 
+	public static function csvToArrayNoHeader($fileName = '', $mustEncoding = true, $delimiter = ',')
+	{
+		if (!file_exists($fileName) || !is_readable($fileName))
+			return false;
+
+		$data = array();
+		if (($handle = fopen($fileName, 'r')) !== false) {
+			return fgetcsv($handle, null, $delimiter);
+			while (($row = fgetcsv($handle, null, $delimiter)) !== false) {
+				$data[] = $row;
+			}
+			fclose($handle);
+		}
+		$data = self::reGenData($data, $mustEncoding);
+		return $data;
+	}
+
+	public static function reGenData($data, $mustEncoding)
+	{
+		$genData = [];
+		foreach ($data as $key => $value) {
+			if ($key > 0) {
+				$tempData = [];
+				foreach ($value as $k => $vl) {
+					$tempData[$data[0][$k]] = $mustEncoding ? self::convertCharacterToUtf8($vl) : $vl;
+				}
+				$genData[] = $tempData;
+			}
+		}
+		return $genData;
+	}
+
 	public static function genData($header, $row, $onlyNeedHeader, $mustEncoding)
 	{
 		$rowData = [];
