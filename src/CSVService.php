@@ -4,9 +4,12 @@ namespace Leontec\CsvReaderLab;
 
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Collection;
 
-class CSVService {
-    public static function csvToArray($fileName = '', $header = [], $onlyNeedHeader = [], $mustEncoding = true, $delimiter = ',')
+class CSVService
+{
+	public static function csvToArray($fileName = '', $header = [], $onlyNeedHeader = [], $mustEncoding = true, $delimiter = ',')
 	{
 		$onlyNeedHeader = count($onlyNeedHeader) ? $onlyNeedHeader : $header;
 
@@ -23,20 +26,25 @@ class CSVService {
 		return $data;
 	}
 
-	public static function csvToArrayNoHeader($fileName = '', $mustEncoding = true, $delimiter = ',')
+	public static function csvToArrayNoHeader($fileName = '', $header = [], $model_class, $onlyNeedHeader = [], $mustEncoding = true, $delimiter = ',')
 	{
 		if (!file_exists($fileName) || !is_readable($fileName))
 			return false;
 
 		$data = array();
 		if (($handle = fopen($fileName, 'r')) !== false) {
-			return fgetcsv($handle, null, $delimiter);
 			while (($row = fgetcsv($handle, null, $delimiter)) !== false) {
-				$data[] = $row;
+				$data[] = self::genData($header, $row, $onlyNeedHeader, $mustEncoding);
 			}
 			fclose($handle);
 		}
-		$data = self::reGenData($data, $mustEncoding);
+		// $model = new $model_class;
+		// $chunkSize = 10000;
+		// DB::transaction(function () use ($data, $chunkSize, $model) {
+		// 	collect($data)->chunk($chunkSize)->each(function ($chunk) use ($model) {
+		// 		$model::upsert($chunk->toArray(), ['id'], ['column1', 'column2']);
+		// 	});
+		// });
 		return $data;
 	}
 
@@ -110,7 +118,7 @@ class CSVService {
 		}
 		return $string;
 	}
-	
+
 	public static function convertCharacterToSjisWin($string, $encoding = 'SJIS-win')
 	{
 		//"SJIS-win"
@@ -205,15 +213,90 @@ class CSVService {
 		return false;
 	}
 
-    public static function exportRawToCsv($fileName, $datas)
+	public static function exportRawToCsv($fileName, $datas)
 	{
-        $csvData = implode(PHP_EOL, $datas);
-        Storage::append($fileName, self::convertCharacterToSjis($csvData));
+		$csvData = implode(PHP_EOL, $datas);
+		Storage::append($fileName, self::convertCharacterToSjis($csvData));
 	}
-	
+
 	public static function exportRawToCsvWin($fileName, $datas)
 	{
-        $csvData = implode(PHP_EOL, $datas);
-        Storage::append($fileName, self::convertCharacterToSjisWin($csvData));
+		$csvData = implode(PHP_EOL, $datas);
+		Storage::append($fileName, self::convertCharacterToSjisWin($csvData));
+	}
+
+	public static function uploadBigSize($request)
+	{
+		// Thư mục lưu trữ tạm thời các chunk
+		$tempDir = storage_path() . '/uploads/temp';
+		// Thư mục lưu trữ file hoàn chỉnh
+		$finalDir = storage_path() . '/uploads/final';
+
+		// Tạo thư mục nếu chưa tồn tại
+		if (!is_dir($tempDir)) {
+			mkdir($tempDir, 0777, true);
+		}
+		if (!is_dir($finalDir)) {
+			mkdir($finalDir, 0777, true);
+		}
+
+		// Lấy thông tin từ client
+		$fileName = $request->fileName ?? null;
+		$chunkIndex = $request->chunkIndex ?? null;
+		$totalChunks = $request->totalChunks ?? null;
+
+		if (!$fileName || $chunkIndex === null || !$totalChunks || !$request->has('chunk')) {
+			http_response_code(400);
+			return ['error' => 'Thông tin không hợp lệ.'];
+			exit;
+		}
+
+		// Lưu chunk vào thư mục tạm
+		$tempPath = $tempDir . '/' . $fileName;
+		if (!is_dir($tempPath)) {
+			mkdir($tempPath, 0777, true);
+		}
+
+		$chunkPath = $tempPath . '/' . $chunkIndex;
+		if (!move_uploaded_file($request->file('chunk')->getPathname(), $chunkPath)) {
+			http_response_code(500);
+			return ['error' => 'Không thể lưu chunk.'];
+			exit;
+		}
+
+		// Kiểm tra nếu tất cả các chunk đã được tải lên
+		$uploadedChunks = array_diff(scandir($tempPath), ['.', '..']);
+		if (count($uploadedChunks) == $totalChunks) {
+			// Hợp nhất các chunk thành file hoàn chỉnh
+			$finalPath = $finalDir . '/' . $fileName;
+			$outputFile = fopen($finalPath, 'wb');
+
+			for ($i = 0; $i < $totalChunks; $i++) {
+				$chunkFile = $tempPath . '/' . $i;
+				$inputFile = fopen($chunkFile, 'rb');
+				while ($buffer = fread($inputFile, 1024 * 1024)) {
+					fwrite($outputFile, $buffer);
+				}
+				fclose($inputFile);
+			}
+
+			fclose($outputFile);
+
+			// Xóa thư mục tạm
+			array_map('unlink', glob($tempPath . '/*'));
+			rmdir($tempPath);
+
+			return [
+				'success' => true,
+				'message' => 'Chunk đã được tải lên.',
+				'data' => $finalPath
+			];
+			exit;
+		}
+
+		return [
+			'success' => true,
+			'message' => 'Chunk đã được tải lên.'
+		];
 	}
 }
